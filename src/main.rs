@@ -1,8 +1,10 @@
 // Uncomment this block to pass the first stage
 use std::{
+    collections::HashMap,
     io::{BufReader, Read, Write},
     net::TcpListener,
     str::from_utf8,
+    sync::{Arc, Mutex},
     thread,
 };
 
@@ -13,11 +15,13 @@ mod parser;
 fn main() {
     let listener = TcpListener::bind("127.0.0.1:6379").unwrap();
 
+    let kv = Arc::new(Mutex::new(HashMap::<String, String>::new()));
+
     for stream in listener.incoming() {
         match stream {
             Ok(mut _stream) => {
                 println!("accepted new connection");
-
+                let kv = Arc::clone(&kv);
                 thread::spawn(move || loop {
                     let mut reader = BufReader::new(&_stream);
                     let mut input = [0; 512];
@@ -83,6 +87,26 @@ fn main() {
                                         }
                                         "PING" => {
                                             _stream.write("$4\r\nPONG\r\n".as_bytes()).unwrap();
+                                        }
+                                        "SET" => {
+                                            let key: String;
+                                            let value: String;
+                                            match &array[1] {
+                                                RespType::BulkString(bulkstring) => {
+                                                    key =
+                                                        from_utf8(bulkstring).unwrap().to_string();
+                                                }
+                                                _ => panic!("should be a BulkString"),
+                                            };
+                                            match &array[2] {
+                                                RespType::BulkString(bulkstring) => {
+                                                    value =
+                                                        from_utf8(bulkstring).unwrap().to_string();
+                                                }
+                                                _ => panic!("should be a BulkString"),
+                                            };
+
+                                            kv.lock().unwrap().insert(key, value);
                                         }
                                         _ => (),
                                     }
