@@ -17,10 +17,15 @@ fn main() {
             Ok(mut _stream) => {
                 println!("accepted new connection");
 
-                let mut buf = [0; 512];
+                loop {
+                    let mut buf = [0; 512];
+                    let len = _stream.read(&mut buf).unwrap();
+                    if len == 0 {
+                        break;
+                    }
 
-                _stream.read(&mut buf).unwrap();
-                _stream.write(b"+PONG\r\n").unwrap();
+                    _stream.write(b"+PONG\r\n").unwrap();
+                }
             }
             Err(e) => {
                 println!("error: {}", e);
