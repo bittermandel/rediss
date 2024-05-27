@@ -107,6 +107,35 @@ fn main() {
                                             };
 
                                             kv.lock().unwrap().insert(key, value);
+                                            _stream.write("+OK\r\n".as_bytes()).unwrap();
+                                        }
+                                        "GET" => {
+                                            let key: String;
+
+                                            match &array[1] {
+                                                RespType::BulkString(bulkstring) => {
+                                                    key =
+                                                        from_utf8(bulkstring).unwrap().to_string();
+                                                }
+                                                _ => panic!("should be a BulkString"),
+                                            };
+
+                                            let kv = kv.lock().unwrap();
+                                            let value = kv.get(&key);
+                                            match value {
+                                                Some(value) => {
+                                                    _stream
+                                                        .write(
+                                                            DataType::BulkString(value.clone())
+                                                                .serialize()
+                                                                .as_bytes(),
+                                                        )
+                                                        .unwrap();
+                                                }
+                                                None => {
+                                                    _stream.write("$-1\r\n".as_bytes()).unwrap();
+                                                }
+                                            }
                                         }
                                         _ => (),
                                     }
