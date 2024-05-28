@@ -6,8 +6,10 @@ use std::{
     str::from_utf8,
     sync::{Arc, Mutex},
     thread,
+    time::Duration,
 };
 
+use chrono::Utc;
 use parser::{parse_command, RespType};
 
 mod parser;
@@ -15,7 +17,7 @@ mod parser;
 fn main() {
     let listener = TcpListener::bind("127.0.0.1:6379").unwrap();
 
-    let kv = Arc::new(Mutex::new(HashMap::<String, String>::new()));
+    let kv = Arc::new(Mutex::new(HashMap::<String, RedisValue>::new()));
 
     for stream in listener.incoming() {
         match stream {
@@ -90,7 +92,10 @@ fn main() {
                                         }
                                         "SET" => {
                                             let key: String;
-                                            let value: String;
+                                            let mut value = RedisValue {
+                                                value: "".to_string(),
+                                                expiration_time: None,
+                                            };
                                             match &array[1] {
                                                 RespType::BulkString(bulkstring) => {
                                                     key =
@@ -100,11 +105,43 @@ fn main() {
                                             };
                                             match &array[2] {
                                                 RespType::BulkString(bulkstring) => {
-                                                    value =
+                                                    value.value =
                                                         from_utf8(bulkstring).unwrap().to_string();
                                                 }
                                                 _ => panic!("should be a BulkString"),
                                             };
+                                            if array.len() > 3 {
+                                                let argument: String;
+                                                let argument_value: String;
+                                                match &array[3] {
+                                                    RespType::BulkString(bulkstring) => {
+                                                        argument = from_utf8(bulkstring)
+                                                            .unwrap()
+                                                            .to_string();
+                                                    }
+                                                    _ => panic!("should be a BulkString"),
+                                                };
+                                                match &array[4] {
+                                                    RespType::BulkString(bulkstring) => {
+                                                        argument_value = from_utf8(bulkstring)
+                                                            .unwrap()
+                                                            .to_string();
+                                                    }
+                                                    _ => panic!("should be a BulkString"),
+                                                };
+
+                                                match argument.as_str() {
+                                                    "px" => {
+                                                        let now = Utc::now()
+                                                            + Duration::from_millis(
+                                                                argument_value.parse().unwrap(),
+                                                            );
+                                                        value.expiration_time =
+                                                            Some(now.timestamp_millis());
+                                                    }
+                                                    _ => (),
+                                                }
+                                            }
 
                                             kv.lock().unwrap().insert(key, value);
                                             _stream.write("+OK\r\n".as_bytes()).unwrap();
@@ -122,13 +159,30 @@ fn main() {
 
                                             let kv = kv.lock().unwrap();
                                             let value = kv.get(&key);
+
                                             match value {
                                                 Some(value) => {
+                                                    if let Some(exp_time) = value.expiration_time {
+                                                        println!(
+                                                            "{:?} - {:?}",
+                                                            Utc::now().timestamp_millis(),
+                                                            exp_time,
+                                                        );
+                                                        if Utc::now().timestamp_millis() > exp_time
+                                                        {
+                                                            _stream
+                                                                .write("$-1\r\n".as_bytes())
+                                                                .unwrap();
+                                                            break;
+                                                        }
+                                                    }
                                                     _stream
                                                         .write(
-                                                            DataType::BulkString(value.clone())
-                                                                .serialize()
-                                                                .as_bytes(),
+                                                            DataType::BulkString(
+                                                                value.value.clone(),
+                                                            )
+                                                            .serialize()
+                                                            .as_bytes(),
                                                         )
                                                         .unwrap();
                                                 }
@@ -152,6 +206,12 @@ fn main() {
             }
         }
     }
+}
+
+#[derive(PartialEq, Eq, Hash)]
+pub struct RedisValue {
+    value: String,
+    expiration_time: Option<i64>,
 }
 
 pub enum DataType {
